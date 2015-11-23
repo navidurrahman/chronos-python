@@ -1,1 +1,3 @@
 httplib2
+texttable
+PyYAML==3.11

@@ -1,0 +1,172 @@
+#!/usr/bin/env python
+import sys
+import yaml
+import os
+import argparse
+
+import chronos
+import texttable
+
+
+class Chronos(object):
+
+    # Following parameter can be used for private docker repo
+    uris = ""
+    async = False
+    epsilon = "PT15M"
+    disabled = False
+    owner = "test@test.com"
+
+    def __init__(self, other_args):
+        self.other_args = other_args
+        self.chronos_url = self.set_chronos_path(self.other_args.chronos_url)
+
+    @staticmethod
+    def set_chronos_path(chronos_url):
+        chronos_url = os.environ.get("CHRONOS_URL") or chronos_url
+        if not chronos_url:
+            sys.exit("Please set the CHRONOS url with -u argument or as an "
+                     "Environment variable 'CHRONOS_URL'.")
+        else:
+            return chronos_url
+
+    @property
+    def connect(self):
+        return chronos.connect(self.chronos_url)
+
+    def list(self):
+        jobs = self.connect.list()
+        headers = ["Name", "Owner", "Schedule", "Epsilon", "Retries", "Command"]
+        rows = [headers]
+        for job in jobs:
+            rows.append([
+                job["name"], job["owner"], job["schedule"], job["epsilon"],
+                job["retries"], job["command"]
+            ])
+        table = texttable.Texttable(max_width=False)
+        table.add_rows(rows)
+        return table.draw()
+
+    def delete_all(self):
+        sys.stdout.write("Are you sure to delete all jobs: 'yes' or 'no': ")
+        choice = raw_input().lower()
+        yes = ['yes', 'y', 'ye', '']
+        if choice in yes:
+            jobs = self.connect.list()
+            for job in jobs:
+                self.connect.delete(job["name"])
+                print "Deleted job: %s" % job["name"]
+
+    @staticmethod
+    def parse_env_file(path):
+        data_dict = []
+        try:
+            with open(path) as f:
+                data = f.readlines()
+                try:
+                    for item in data:
+                        item_split = item.split("=")
+                        data_dict.append({
+                            "name": item_split[0].strip(),
+                            "value": "=".join(item_split[1:]).strip()
+                        })
+                except (ValueError, IndexError):
+                    sys.exit("Error: failed to decode %s" % path)
+        except TypeError as e:
+            sys.exit(e.message)
+
+        return data_dict
+
+    def construct_json(self, data_dict):
+        env_file = self.other_args.env_file
+        data_dict.setdefault("uris", self.uris)
+        data_dict.setdefault("async", self.async)
+        data_dict.setdefault("epsilon", self.epsilon)
+        data_dict.setdefault("disabled", self.disabled)
+        data_dict["environmentVariables"] = (
+            self.parse_env_file(env_file) if env_file else None)
+
+        if self.other_args.docker_version:
+            data_dict["container"] = {
+                "type": "DOCKER",
+                "image": self.other_args.docker_version,
+                "network": "BRIDGE",
+            }
+
+        if "container" in data_dict and "volumes" not in data_dict["container"]:
+            data_dict["container"]["volumes"] = [
+                {
+                    "containerPath": "/var/log/",
+                    "hostPath": "/logs/",
+                    "mode": "RW"
+                }]
+
+        return data_dict
+
+    def create_or_update(self):
+        job_file = self.other_args.yaml_file
+        if not job_file:
+            sys.exit("Job definition file is requited in yaml format")
+
+        with open(job_file, 'r') as file_stream:
+            jobs_list = yaml.load(file_stream)
+            for job in jobs_list["jobs"]:
+                job["owner"] = (
+                    job.get("owner") or jobs_list.get("owner") or self.owner)
+                data = self.construct_json(job)
+                try:
+                    self.connect.add(data)
+                except chronos.MissingFieldError as error:
+                    sys.exit(error.message)
+                else:
+                    print "%s: Job added/updated successfully." % job["name"]
+
+    def check_status(self):
+        job_name = self.other_args.job_name
+        if not job_name:
+            sys.exit("Enter job name to retrieve the status.")
+
+        jobs = self.connect.list()
+        for job in jobs:
+            if job_name == job["name"]:
+                return job["lastSuccess"]
+        else:
+            sys.exit("Job %s doesn't exist" % job_name)
+
+    def delete(self):
+        return self.connect.delete(self.other_args.job_name)
+
+
+def get_args():
+    """Parse and validate script's input parameters."""
+    parser = argparse.ArgumentParser(os.path.basename(__file__))
+
+    parser.add_argument("action",
+                        choices=["create_or_update", "delete", "list", "delete_all", "check_status"],
+                        help='Action to perform.')
+
+    parser.add_argument("-e", "--env-file",
+                        help='Environment variable file to use.')
+
+    parser.add_argument("-y", "--yaml-file",
+                        help='YAML file for all jobs')
+
+    parser.add_argument("-j", "--job-name",
+                        help="Job id to delete the job.")
+
+    parser.add_argument("-d", "--docker-version",
+                        help="Docker PATH to run.")
+
+    parser.add_argument("-u", "--chronos-url",
+                        help="CHRONOS url without http.")
+
+    return parser.parse_args()
+
+
+def main():
+    args = get_args()
+    c = Chronos(other_args=args)
+    print getattr(c, args.action)()
+
+if __name__ == "__main__":
+    main()

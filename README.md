@@ -47,3 +47,36 @@ c.delete_tasks("job123")
 * `chronos-nagios.py` - Nagios/Icinga style monitor of jobs
 `chronos-nagios.py --hostname chronos.server.com:4400 --crit 3 --prefix etl. --prefix data.`
 `chronos-nagios.py --hostname chronos.server.com:4400 --crit 3 --exclude etl.`
+
+* `chronos` - command line to update chronos jobs in yaml format
+`# export CHRONOS_URL as environment variable and use following commands to see the outputs`
+`chronos list`
+`chronos delete -j <job_name>`
+`Added support to create or update cronjobs using YAML files, you can specify all arguments in the yaml file, otherwise the job will be scheduled with default settings. In addition, environment files can be passed through -e argument`
+`chronos create_or_update -e </path/to/envirnoment_file> -d <libmesos/ubuntu> -y yaml file`
+
+### YAML file format
+```
+# YAML
+name: job_list_file
+owner: test@test.com
+
+jobs:
+- name: test_job_1
+  schedule: R1/2014-09-25T17:22:00Z/PT2M
+  command: "while sleep 10; do date =u %T; done"
+  mem: 512
+  cpus: 0.5
+
+- name: test_job_2
+  schedule: R1/2014-09-25T17:22:00Z/PT2M
+  command: "while sleep 10; do date =u %T; done"
+```
+### ENV file format
+```
+TEST_ENV1=test
+TEST_ENV2=test
+TEST_ENV3=test
+TEST_ENV4=test
+TEST_ENV5=test
+```
